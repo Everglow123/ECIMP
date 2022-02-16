@@ -1,0 +1,7 @@
+beautifulsoup4==4.10.0
+numpy==1.18.5
+scikit_learn==1.0.2
+torch==1.10.1+cu113
+tqdm==4.47.0
+transformers==4.14.1
+typing_extensions==4.1.1
