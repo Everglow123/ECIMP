@@ -110,7 +110,7 @@ def mlm_base_preprocess_data(data:Dict[str,Any],tokenizer:Union[BertTokenizer,Ro
             continue
         format_str1=make_format_str(
             tokens=tokens,
-            source_start_index=event1_end_index,
+            source_start_index=event1_start_index,
             source_end_index=event1_end_index,
             target_start_index=event2_start_index,
             target_end_index=event2_end_index,
