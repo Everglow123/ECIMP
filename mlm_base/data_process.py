@@ -69,13 +69,13 @@ def make_format_str(
     )->Optional[str]:
 
     new_tokens=tokens.copy()
-    new_tokens[source_start_index]=T1+" "+new_tokens[source_start_index]
-    new_tokens[source_end_index]=new_tokens[source_end_index]+" "+T2
-    new_tokens[target_start_index]=T3+" "+new_tokens[target_start_index]
-    new_tokens[target_end_index]=new_tokens[target_end_index]+" "+T4
+    new_tokens[source_start_index]=T1+""+new_tokens[source_start_index]
+    new_tokens[source_end_index]=new_tokens[source_end_index]+""+T2
+    new_tokens[target_start_index]=T3+""+new_tokens[target_start_index]
+    new_tokens[target_end_index]=new_tokens[target_end_index]+""+T4
     
     new_tokens=new_tokens[substr_token_start_index:substr_token_end_index+1]
-    return " ".join(new_tokens)
+    return "".join(new_tokens)
 def valid_data_preprocess(data:Dict[str,Any]):
     
     for rel in data["relations"]:
@@ -91,9 +91,14 @@ def mlm_base_preprocess_data(data:Dict[str,Any],tokenizer:Union[BertTokenizer,Ro
     res=[]
     for rel in relations:
         event1_start_index=rel["event1_start_index"]
-        event1_end_index=rel["event1_end_index"]
+        event1_end_index=rel["event1_end_index"]-1
         event2_start_index=rel["event2_start_index"]
-        event2_end_index=rel["event2_end_index"]
+        event2_end_index=rel["event2_end_index"]-1
+        if (event1_start_index<=event2_start_index and event1_end_index>=event2_end_index)or\
+            (event1_start_index>=event2_start_index and event1_end_index<=event2_end_index):
+            continue
+        if event1_start_index>event1_end_index or event2_start_index>event2_end_index :
+            continue
         # signal_start_index=rel["signal_start_index"]
         # signal_end_index=rel["signal_end_index"]
         cause=rel["cause"]
@@ -123,7 +128,7 @@ def mlm_base_preprocess_data(data:Dict[str,Any],tokenizer:Union[BertTokenizer,Ro
         event1_start_index,event1_end_index,event2_start_index,event2_end_index=event2_start_index,event2_end_index,event1_start_index,event1_end_index
         format_str2=make_format_str(
             tokens=tokens,
-            source_start_index=event1_end_index,
+            source_start_index=event1_start_index,
             source_end_index=event1_end_index,
             target_start_index=event2_start_index,
             target_end_index=event2_end_index,
@@ -166,7 +171,8 @@ def process_one_sentence(
     target_mask[target_start_index:target_end_index+1]=1
     
     signal_mask:np.ndarray=np.zeros(len(token_ids),dtype=np.int)
-
+    if target_mask.sum()==0:
+        print("wtf!")
  
     
     """同步删除t1,t2,t3,t4"""

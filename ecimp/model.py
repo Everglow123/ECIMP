@@ -5,7 +5,7 @@
 @时间    :2021/12/22 16:48:02
 @作者    :周恒
 @版本    :1.0
-@说明    :核心模型
+@说明    :
 '''
 
 
@@ -145,8 +145,8 @@ class ECIMPModel(torch.nn.Module):
             mask1_feature = (gate_weight_repeated*mask1_feature) + \
                 ((1-gate_weight_repeated)*other_feature)
             # mask1_feature=torch.tanh(mask1_feature)
-        if self.training:
-            mask1_feature=self.dropout(mask1_feature)
+        
+        mask1_feature=self.dropout(mask1_feature)
         if self.use_linear:
             mask1_output=self.mask_linear(mask1_feature)
         else:
@@ -419,9 +419,7 @@ class BatchCalLossFunc:
 batch_cal_loss_func = BatchCalLossFunc(True, True)
 
 
-def get_optimizer(model: ECIMPModel, lr: float)->torch.optim.Optimizer:
-    """优化器,使用分段学习率
-    """
+def get_optimizer(model: ECIMPModel, lr: float):
     raw_params=set()
     for layer in [model.mlm,model.lm_head,model.lm_decoder]:
         for param in layer.parameters():
@@ -457,7 +455,7 @@ class BatchMetricsFunc:
         cause_preds1 = torch.argmax(mask1_output_1, dim=1).reshape([-1]).cpu()
         cause_preds2 = torch.argmax(mask1_output_2, dim=1).reshape([-1]).cpu()
         if self.mode == "or":
-            """正反两方向只要有一个预测有关系,就视作有关系"""
+            """正反两方向只要有一个预测有关系，就视作有关系"""
             cause_preds = torch.logical_or(cause_preds1, cause_preds2).long()
 
         elif self.mode == "and":

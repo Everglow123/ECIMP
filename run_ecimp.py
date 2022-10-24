@@ -7,20 +7,23 @@
 @版本    :1.0
 @说明    :
 '''
+import os
 import sys
 import pickle
 import random
 import json
 from typing import Any, Dict
 from typing_extensions import Literal
+
 import numpy as np
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
+from transformers import BertForMaskedLM,AutoModelForMaskedLM
 from trainer import Trainer
 import torch
 import argparse
 from ecimp import (
     ecimp_init_tokenizer,
-    ecimp_preprocess_data,
+    PreprocessDataFunc,
     ECIMPCollator,
     ECIMPModel,
     batch_cal_loss_func,
@@ -51,7 +54,7 @@ parser.add_argument("--device_ids", type=str, default="0,1")
 parser.add_argument("--batch_size", type=int, default=4)
 parser.add_argument("--num_workers", type=int, default=12)
 parser.add_argument("--learning_rate", type=float, default=0.00005)
-parser.add_argument("--epochs", type=int, default=40)
+parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--mlm_name_or_path", type=str, default="roberta-base")
 parser.add_argument("--data_path", type=str, required=True)
 parser.add_argument("--split_n", type=int, required=True)
@@ -84,18 +87,26 @@ if __name__ == '__main__':
     """
     metrics_mode: Literal["and", "or"] = "or"
 
+
+    """!!!!!!模型语言设置"""
+    language:Literal["en","zh"]='en'
+
+
+
+    
     """ecimp模型的对比实验设置"""
-    use_linear: bool = bool(args.use_linear) #是否使用线性层
-    use_event_prompt: bool = bool(args.use_event_prompt)#是否使用event_prompt
-    use_signal_prompt: bool = bool(args.use_signal_prompt)#是否使用signal_prompt
-    use_sep_gate: bool = bool(args.use_sep_gate)#是否使用sep_gate
-    use_mask1_gate: bool = bool(args.use_mask1_gate)#是否使用mask1_gate
+    use_linear: bool = bool(args.use_linear)
+    use_event_prompt: bool = bool(args.use_event_prompt)
+    use_signal_prompt: bool = bool(args.use_signal_prompt)
+    use_sep_gate: bool = bool(args.use_sep_gate)
+    use_mask1_gate: bool = bool(args.use_mask1_gate)
     reuse: bool = bool(args.reuse)  # 是否复用 na cause caused_by 这3个向量
     """"""
     for arg in args._get_kwargs():
         print(arg)
 
     """functor初始化"""
+    ecimp_preprocess_data=PreprocessDataFunc(language,True,True,True)
     ecimp_preprocess_data.reuse = reuse
     ecimp_preprocess_data.use_signal_prompt = use_signal_prompt
     ecimp_preprocess_data.use_event_prompt = use_event_prompt
@@ -114,7 +125,7 @@ if __name__ == '__main__':
         valid_raw_dataset = [raw_data[i] for i in valid_indexs]
 
         tokenizer = ecimp_init_tokenizer(mlm_type, "ecimp/mlm")
-        mlm = RobertaForMaskedLM.from_pretrained(mlm_type)
+        mlm = AutoModelForMaskedLM.from_pretrained(mlm_type)
         train_dataset = []
         valid_dataset = []
         for data in train_raw_dataset:
@@ -136,6 +147,12 @@ if __name__ == '__main__':
             use_mask1_gate=use_mask1_gate,
             use_linear=use_linear
         )
+        # with open("ecimp/saved/epoch4.pt","rb") as f:
+        #     state=torch.load(f,map_location="cpu")
+        #     model.load_state_dict(state)
+        # with open("ere_model.pt","wb") as f:
+        #     torch.save(model,f)
+        # quit(0)
         optimizer = get_optimizer(model, learning_rate)
 
         collator = ECIMPCollator(
@@ -169,7 +186,9 @@ if __name__ == '__main__':
             valid_dataset_sampler=valid_dataset_sampler,
             valid_step=1,
             start_epoch=0,
-            gradient_accumulate=gradient_accumulate
+            gradient_accumulate=gradient_accumulate,
+            save_model=True,
+
         )
 
         trainer.train()

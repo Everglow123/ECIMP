@@ -113,6 +113,8 @@ def baseline_preprocess_data(data:Dict[str,Any],tokenizer:Union[BertTokenizer,Ro
     sentences=data["sentences"]
     relations:Dict[str,int]=data["relations"]
     res=[]
+    if relations is None:
+        return res
     for rel in relations:
         event1_start_index=rel["event1_start_index"]
         event1_end_index=rel["event1_end_index"]

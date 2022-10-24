@@ -1,29 +1,16 @@
-#!/home/zhouheng/anaconda3/bin/python
-# -*- encoding: utf-8 -*-
-'''
-@文件    :data_process.py
-@时间    :2021/12/22 17:26:16
-@作者    :周恒
-@版本    :1.0
-@说明    :大力出奇迹了，属于是 
-'''
-
-
-
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Sized, Tuple, Union
-from dataclasses import asdict, dataclass
-import numpy as np
+from curses import raw
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import uuid
+from tqdm import tqdm
 import torch
-from torch.utils.data.sampler import WeightedRandomSampler,Sampler
-from transformers import AutoModel,AutoTokenizer
+from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.sampler import SequentialSampler
+import logging
+from ecimp import ECIMPModel
+from transformers import AutoTokenizer,BertTokenizer, InputFeatures, RobertaTokenizer
 from transformers.file_utils import PaddingStrategy
-from transformers.models.bert.modeling_bert import BertModel
-from transformers.models.bert.tokenization_bert import BertTokenizer
-from transformers.models.roberta.modeling_roberta import RobertaModel
-from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
-from transformers.tokenization_utils_base import TruncationStrategy
-
-
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)s:%(funcName)s] - %(message)s",datefmt= "%Y-%m-%d %H:%M:%S")
 """N/A,cause,causedby"""
 TNA="</tna>"
 TCAUSE="</tcause>"
@@ -52,28 +39,6 @@ T11="</t11>"
 T12="</t12>"
 T13="</t13>"
 T14="</t14>"
-
-
-
-"""bert input sequence max length """
-MAX_LENTH=512
-
-def ecimp_init_tokenizer(name_or_path:str,save_dir:str)->Tuple[Union[BertModel,RobertaModel],Union[BertTokenizer,RobertaTokenizer]]:
-    """初始化分词器，加入17个特殊字符"""
-    
-    # mlm:AutoModel=AutoModel.from_pretrained(name_or_path)
-    mlm_tokenizer=AutoTokenizer.from_pretrained(name_or_path)
-    """分词器增加特殊字符"""
-    special_tokens_dict={"additional_special_tokens":[TNA,TCAUSE,TCAUSEDBY,T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,T13,T14]}
-    mlm_tokenizer.add_special_tokens(special_tokens_dict)
-
-    # """预训练模型扩充token embedding,新增加的token embedding是随机初始化的"""
-    # mlm.resize_token_embeddings(len(mlm_tokenizer))
-    
-    mlm_tokenizer.save_pretrained(save_dir)
-
-    return  mlm_tokenizer
-
 def make_prompted(
         tokens:List[str],
         event1_start_index:int,
@@ -205,18 +170,12 @@ class ECIMPInputfeature:
     prompted_sentence2:str
     cause1:int
     cause2:int
-    signal:bool #为了统计结果
-
-def valid_data_preprocess(data:Dict[str,Any]):
-    """验证集不能出现signal_start_index signal_end_index
-    """
-    for rel in data["relations"]:
-        if rel["signal_start_index"]>=0:
-            rel["signal"]=True
-        rel["signal_start_index"]=-1
-        rel["signal_end_index"]=-1
-        
-    return data
+    sentence_id:uuid.UUID
+    event1_start_index:int=0
+    event1_end_index:int=0
+    event2_start_index:int=0
+    event2_end_index:int=0
+    signal:bool=False
 
 class PreprocessDataFunc:
     def __init__(
@@ -229,8 +188,7 @@ class PreprocessDataFunc:
         self.use_event_prompt=use_event_prompt
         self.use_signal_prompt=use_signal_prompt
         self.reuse=reuse
-        
-    def __call__(self,data:Dict[str,Any],tokenizer:Union[BertTokenizer,RobertaTokenizer]) -> List[ECIMPInputfeature]:
+    def __call__(self,id_:str,data:Dict[str,Any],tokenizer:Union[BertTokenizer,RobertaTokenizer]) -> List[ECIMPInputfeature]:
         tokens=data["tokens"]
         token_index2sentence_index=data["token_index2sentence_index"]
         sentences=data["sentences"]
@@ -253,7 +211,7 @@ class PreprocessDataFunc:
             signal_start_index=-1
             signal_end_index=-1
 
-            cause:int=rel["cause"]
+            cause:int=0
             signal=False 
             if "signal" in rel:
                 signal=rel["signal"]
@@ -315,11 +273,8 @@ class PreprocessDataFunc:
             )
             if prompt2==None:
                 continue
-            res.append(ECIMPInputfeature(prompt1,prompt2,-cause,cause,signal))
+            res.append(ECIMPInputfeature(prompt1,prompt2,-cause,cause,id_,event1_start_index,event1_end_index,event2_start_index,event2_end_index))
         return res
-
-
-
 def process_one_prompt(
         token_ids:List[int],
         tokenizer:Union[BertTokenizer,RobertaTokenizer],
@@ -347,6 +302,7 @@ def process_one_prompt(
         sep_signal_index[0]=token_ids.index(tokenizer.sep_token_id,sep_event_index[0].item()+1)
     elif use_event_prompt:
         sep_signal_index[0]=token_ids.index(tokenizer.sep_token_id)
+
     input_ids=torch.where(input_ids>=tokenizer.vocab_size,torch.tensor(0,dtype=torch.long),input_ids)
     """第1个mask 也就是base prompt部分"""
     
@@ -406,8 +362,6 @@ def process_one_prompt(
         input_ids_for_new,                            \
         sep_event_index,                              \
         sep_signal_index
-
-        
 class ECIMPCollator:
     def __init__(
         self,
@@ -527,27 +481,175 @@ class ECIMPCollator:
             batch_sep_event_index_2,  \
             batch_sep_signal_index_2, \
             batch_signals
+@dataclass
+class Event:
+    start_index:int
+    end_index:int
+    
 
-class ECIMPSampler(Sampler):
-    def __init__(self, data_source:List[ECIMPInputfeature],replacement:bool=True) -> None:
-        super().__init__(data_source=data_source)
-        positive_index:List[int]=[]
-        negative_index:List[int]=[]
-        
-        for index,inputfeature in enumerate(data_source):
-            if inputfeature.cause1:
-                positive_index.append(index)
-            else:
-                negative_index.append(index)
-        positive_weight=(len(negative_index)/len(positive_index))/7
-        weights=torch.ones([len(data_source)],dtype=torch.float32)
-        positive_indices=torch.tensor(positive_index,dtype=torch.long)
-        weights[positive_indices]=positive_weight
+@dataclass
+class SentenceInstance:
+    tokens:List[str]
+    events:List[Event]
+    id:str=str(uuid.uuid4())
+    
+class EREPipeline:
+    def __init__(self,language:str,mlm_dir,dump_path:str,tokenizer_dir:str,batch_size:int=4) -> None:
+        """构造函数
 
-        self.impl=WeightedRandomSampler(weights=weights,num_samples=len(data_source),replacement=replacement)
-        
-    def __iter__(self):
-        return self.impl.__iter__()
+        Args:
+            language (str): 语言,en 或者 zh
+            mlm_dir (_type_): 预训练语言模型的目录
+            dump_path (str): ERE训练好的模型的文件路径
+            tokenizer_dir (str): 预训练语言模型分词器的目录（中文应该设置成中文bert的目录）
+            logger (logging.Logger): 日志
+        """
+        self.model:ECIMPModel=ECIMPModel(mlm_dir,True,False,False,True,True)
+        with open(dump_path,"rb") as f:
+            state=torch.load(f,map_location='cpu')
+            self.model.load_state_dict(state)
+        self.model.eval()
+        self.tokenizer:BertTokenizer=BertTokenizer.from_pretrained(tokenizer_dir)
+        self.data_preprocess_func:PreprocessDataFunc=PreprocessDataFunc(language,True,False,True)
+        self.collator:ECIMPCollator=ECIMPCollator(self.tokenizer,True,False)
+        self.logger=logging.getLogger(self.__class__.__name__)
+        self.batch_size=batch_size
+        # self.logger.
+    def predict(self,instances:List[SentenceInstance],device:torch.device)->Dict[str,List[Dict[str,int]]]:
+        """推理
 
-    def __len__(self) -> int:
-        return len(self.impl)
+        Args:
+            instances (List[SentenceInstance]):
+            device (torch.device): _description_
+
+        Returns:
+            Dict[str,List[Dict[str,int]]]: _description_
+        """
+        try:
+            res:Dict[str,List[Dict[str,int]]]={}
+            raw_data:Dict[str,Dict]={}
+            for instance in instances:
+                id_=instance.id
+                res[id_]={}
+                if not(id_ in raw_data):
+                    raw_data[id_]={}
+                    raw_data[id_]["tokens"]=instance.tokens
+                    tokens_count=len(instance.tokens)
+                    raw_data[id_]["token_index2sentence_index"]=[0 for x in range(tokens_count)]
+                    raw_data[id_]["sentences"]=[{"start":0,"end":tokens_count-1}]
+                    raw_data[id_]["events"]=instance.events
+           
+            raw_data1={}
+            for k,v in raw_data.items():#过滤掉事件数量少于2的句子
+                if len(v["events"])>1:
+                    raw_data1[k]=v
+            raw_data=raw_data1
+            for k,v in raw_data.items():
+                size=len(v['events'])
+                events=v['events']
+                v["relations"]=[]
+                """事件之间两两构造事件对"""
+                for i in range(size-1):
+                    for j in range(i+1,size):
+                        rel={}
+                        e1:Event=events[i]
+                        e2:Event=events[j]
+                        rel["event1_start_index"]=e1.start_index
+                        rel["event1_end_index"]=e1.end_index
+                        rel['event2_start_index']=e2.start_index
+                        rel["event2_end_index"]=e2.end_index
+                        rel["signal_start_index"]=-1
+                        rel["signal_end_index"]=-1
+                        v["relations"].append(rel)
+            
+            inputfeatures:List[ECIMPInputfeature]=[]
+            for k,v in raw_data.items():
+                inputfeatures.extend(self.data_preprocess_func(k,v,self.tokenizer))
+            if len(inputfeatures)>0:
+                self.model=self.model.to(device=device)
+            dataloader=DataLoader(dataset=inputfeatures,batch_size=self.batch_size,shuffle=False,num_workers=12)
+            it=iter(dataloader)
+            with tqdm(total=len(dataloader),ncols=80) as tqbar:
+                with torch.no_grad():
+                    while True:
+                        batch_data:List[ECIMPInputfeature]=[]
+                        
+                        try:
+                            batch_data=next(it)
+                            
+                        except StopIteration:
+                            break
+                        batch_tensors=self.collator(batch_data)
+                        batch_tensors=tuple(list(map(lambda t:t.to(device),list(batch_tensors))))
+                        batch_vocab_masks,        \
+                        batch_label_1,            \
+                        batch_mask_1,             \
+                        batch_input_ids_1,        \
+                        batch_cause_1,            \
+                        batch_mask1_index_1,      \
+                        batch_mask_for_mask2_1,   \
+                        batch_mask_for_mask3_1,   \
+                        batch_mask_for_mask4_1,   \
+                        batch_input_ids_for_new_1,\
+                        batch_sep_event_index_1,  \
+                        batch_sep_signal_index_1, \
+                        batch_label_2,            \
+                        batch_mask_2,             \
+                        batch_input_ids_2,        \
+                        batch_cause_2,            \
+                        batch_mask1_index_2,      \
+                        batch_mask_for_mask2_2,   \
+                        batch_mask_for_mask3_2,   \
+                        batch_mask_for_mask4_2,   \
+                        batch_input_ids_for_new_2,\
+                        batch_sep_event_index_2,  \
+                        batch_sep_signal_index_2, \
+                        batch_signals=batch_tensors
+
+                        
+
+                        preds=self.model(
+                            batch_mask_1,
+                            batch_input_ids_1,
+                            batch_mask1_index_1,
+                            batch_input_ids_for_new_1,
+                            batch_sep_event_index_1,
+                            batch_sep_signal_index_1,
+                            batch_mask_2,
+                            batch_input_ids_2,
+                            batch_mask1_index_2,
+                            batch_input_ids_for_new_2,
+                            batch_sep_event_index_2,
+                            batch_sep_signal_index_2
+                        )
+                        mask1_output_1,\
+                        lm_decoder_output_1,\
+                        mask1_output_2,\
+                        lm_decoder_output_2 = preds
+
+                        
+
+                        cause_preds = None
+                        cause_preds1 = torch.argmax(mask1_output_1, dim=1).reshape([-1]).cpu()
+                        cause_preds2 = torch.argmax(mask1_output_2, dim=1).reshape([-1]).cpu()
+                        cause_preds=torch.logical_or(cause_preds1,cause_preds2).long()
+                        
+                        for idx,inputfeature in enumerate(batch_data):
+                            pred=cause_preds[idx].item()
+                            if pred!=0:
+                                if not (id_ in res):
+                                    res[id_]=[]
+                                res[id_].append({
+                                    "event1_start_index":inputfeature.event1_start_index,
+                                    "event1_end_index":inputfeature.event1_end_index,
+                                    "event1":"".join(raw_data[id_]["tokens"][inputfeature.event1_start_index:inputfeature.event1_end_index+1]),
+                                    'event2_start_index':inputfeature.event2_start_index,
+                                    "event2_end_index":inputfeature.event2_end_index,
+                                    "event2":"".join(raw_data[id_]["tokens"][inputfeature.event2_start_index:inputfeature.event2_end_index+1])
+                                })
+                        tqbar.update(1)
+            return res
+        except Exception as ex:
+            self.logger.warn(ex)
+            return []
+    

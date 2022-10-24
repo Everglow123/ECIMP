@@ -69,6 +69,7 @@ class MlmBaseModel(torch.nn.Module):
         feature=torch.cat([source_feature,target_feature],dim=1)
         if self.training:
             feature=self.dropout(feature)
+        
         return self.classification(feature)
         # """batch_size * sequence_size * position_embedding_dim"""
         # source_position_embedding=self.source_position_embedding(batch_source_relative_position+100)

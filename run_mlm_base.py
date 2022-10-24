@@ -13,7 +13,7 @@ import pickle
 import random
 import json
 from typing import Any, Dict
-from typing_extensions import Literal
+# from typing_extensions import Literal
 import numpy as np
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from trainer import Trainer

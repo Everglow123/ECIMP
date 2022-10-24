@@ -21,19 +21,12 @@ from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from transformers.models.roberta import RobertaForMaskedLM, RobertaTokenizer
 from typing_extensions import Literal
 
-from prompt_tuning import (
-    BaselineCollator,
-    BaselineFinetuningModel,
-    BaselineSampler,
-    baseline_init_tokenizer,
-    baseline_preprocess_data,
-    batch_cal_loss_func,
-    batch_forward_func,
-    batch_metrics_func,
-    get_optimizer,
-    metrics_cal_func,
-    valid_data_preprocess
-)
+from prompt_tuning import (BaselineCollator, BaselineFinetuningModel,
+                           BaselineSampler, baseline_init_tokenizer,
+                           baseline_preprocess_data, batch_cal_loss_func,
+                           batch_forward_func, batch_metrics_func,
+                           get_optimizer, metrics_cal_func,
+                           valid_data_preprocess)
 from trainer import Trainer
 
 
@@ -56,22 +49,22 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--mlm_name_or_path", type=str, default="roberta-base")
 parser.add_argument("--data_path", type=str, required=True)
 parser.add_argument("--split_n", type=int, required=True)
-parser.add_argument("--gradient_accumulate", type=int, default=1)
+parser.add_argument("--gradient_accumulate",type=int,default=1)
 if __name__ == '__main__':
     set_random_seed(114514)
-    args = parser.parse_args()
+    args=parser.parse_args()
     """一些常规的设置"""
     dev = torch.device(3)
-    dev = torch.device(args.main_device)
-    device_ids = list(map(lambda x: int(x), args.device_ids.split(",")))
-    batch_size = args.batch_size
-    num_workers = args.num_workers
-    learning_rate = args.learning_rate
-    epochs = args.epochs
-    mlm_type = args.mlm_name_or_path
-    data_path = args.data_path
-    split_n = args.split_n
-    gradient_accumulate = args.gradient_accumulate
+    dev=torch.device(args.main_device)
+    device_ids=list(map(lambda x:int(x),args.device_ids.split(",")))
+    batch_size=args.batch_size
+    num_workers=args.num_workers
+    learning_rate=args.learning_rate
+    epochs=args.epochs
+    mlm_type=args.mlm_name_or_path
+    data_path=args.data_path
+    split_n=args.split_n
+    gradient_accumulate=args.gradient_accumulate
 
     for arg in args._get_kwargs():
         print(arg)
