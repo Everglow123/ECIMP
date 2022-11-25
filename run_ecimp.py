@@ -154,7 +154,7 @@ if __name__ == '__main__':
         #     torch.save(model,f)
         # quit(0)
         optimizer = get_optimizer(model, learning_rate)
-
+        model=torch.nn.parallel.DataParallel(model,device_ids)
         collator = ECIMPCollator(
             tokenizer,
             use_event_prompt=use_event_prompt,
